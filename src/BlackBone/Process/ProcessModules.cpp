@@ -54,7 +54,8 @@ ModuleDataPtr ProcessModules::GetModule(
 /// <summary>
 /// Get module by name
 /// </summary>
-/// <param name="name">TModule name.</param>
+/// <param name="name">Module name.</param>
+/// <param name="search">Search type.</param>
 /// <param name="type">Module type. 32 bit or 64 bit</param>
 /// <param name="baseModule">Import module name. Used only to resolve ApiSchema during manual map</param>
 /// <returns>Module data. nullptr if not found</returns>
@@ -92,8 +93,8 @@ ModuleDataPtr ProcessModules::GetModule(
 /// </summary>
 /// <param name="modBase">Module base address</param>
 /// <param name="strict">If true modBase must exactly match module base address</param>
+/// <param name="search">Search type.</param>
 /// <param name="type">Module type. 32 bit or 64 bit</param>
-/// <param name="search">Saerch type</param>
 /// <returns>Module data. nullptr if not found</returns>
 ModuleDataPtr ProcessModules::GetModule(
     module_t modBase,
@@ -346,6 +347,26 @@ call_result_t<exportData> ProcessModules::GetExport( const ModuleDataPtr& hMod, 
 }
 
 /// <summary>
+/// Get export from ntdll
+/// </summary>
+/// <param name="name_ord">Function name or ordinal</param>
+/// <param name="type">Module type. 32 bit or 64 bit</param>
+/// <param name="search">Search type.</param>
+/// <returns>Export info. If failed procAddress field is 0</returns>
+call_result_t<exportData> ProcessModules::GetNtdllExport( 
+    const char* name_ord,
+    eModType type /*= mt_default*/, 
+    eModSeachType search /*= LdrList */ 
+    )
+{
+    auto mod = GetModule( L"ntdll.dll", search, type );
+    if (!mod)
+        return STATUS_NOT_FOUND;
+
+    return GetExport( mod, name_ord );
+}
+
+/// <summary>
 /// Inject image into target process
 /// </summary>
 /// <param name="path">Full-qualified image path</param>
@@ -408,7 +429,7 @@ call_result_t<ModuleDataPtr> ProcessModules::Inject( const std::wstring& path )
     if (_proc.core().isWow64() && img.mType() == mt_mod64)
         switchMode = ForceSwitch;
 
-    auto pLdrLoadDll = GetExport( GetModule( L"ntdll.dll", Sections, img.mType() ), "LdrLoadDll" );
+    auto pLdrLoadDll = GetNtdllExport( "LdrLoadDll", img.mType(), Sections );
     if (!pLdrLoadDll)
         return pLdrLoadDll.status;
 
@@ -460,7 +481,7 @@ NTSTATUS ProcessModules::Unload( const ModuleDataPtr& hMod )
         return STATUS_NOT_FOUND;
 
     // Unload routine
-    auto pUnload = GetExport( GetModule( L"ntdll.dll", LdrList, hMod->type ), "LdrUnloadDll" );
+    auto pUnload = GetNtdllExport( "LdrUnloadDll", hMod->type );
     if (!pUnload)
         return pUnload.status;
 
@@ -489,7 +510,7 @@ NTSTATUS ProcessModules::Unload( const ModuleDataPtr& hMod )
 /// <returns>true on success</returns>
 bool ProcessModules::Unlink( const ModuleDataPtr& mod )
 {
-    return _proc.nativeLdr().Unlink( mod->baseAddress, mod->name, mod->type );
+    return _proc.nativeLdr().Unlink( *mod );
 }
 
 /// <summary>
@@ -515,24 +536,18 @@ bool ProcessModules::ValidateModule( module_t base )
 /// <summary>
 /// Store manually mapped module in module list
 /// </summary>
-/// <param name="FilePath">Full qualified module path</param>
-/// <param name="base">Base address</param>
-/// <param name="size">Module size</param>
-/// <param name="mt">Module type. 32 bit or 64 bit</param>
+/// <param name="mod">Module data</param>
 /// <returns>Module info</returns>
-ModuleDataPtr ProcessModules::AddManualModule( const std::wstring& FilePath, module_t base, size_t size, eModType mt )
+ModuleDataPtr ProcessModules::AddManualModule( const ModuleData& mod )
 {
-    ModuleData module;
+    auto modCopy( mod );
 
-    module.fullPath = Utils::ToLower( FilePath );
-    module.baseAddress = base;
-    module.size = size;
-    module.name = Utils::ToLower( Utils::StripPath( FilePath ) );
-    module.manual = true;
-    module.type = mt;
+    modCopy.fullPath = Utils::ToLower( modCopy.fullPath );
+    modCopy.name = Utils::ToLower( modCopy.name );
+    modCopy.manual = true;
 
-    auto key = std::make_pair( module.name, module.type );
-    _modules.emplace( std::make_pair( key, std::make_shared<const ModuleData>( module ) ) );
+    auto key = std::make_pair( modCopy.name, modCopy.type );
+    _modules.emplace( std::make_pair( key, std::make_shared<const ModuleData>( modCopy ) ) );
 
     return _modules.find( key )->second;
 }
@@ -602,8 +617,10 @@ bool ProcessModules::InjectPureIL(
 
     const std::wstring* strArr[] = { &netVersion, &netAssemblyPath, &ClassName, &MethodName, &netAssemblyArgs };
 
-    uintptr_t* ofstArr[] = { &address_VersionString, &address_netAssemblyDll, &address_netAssemblyClass,
-                          &address_netAssemblyMethod, &address_netAssemblyArgs };
+    uintptr_t* ofstArr[] = { 
+        &address_VersionString, &address_netAssemblyDll, &address_netAssemblyClass,
+        &address_netAssemblyMethod, &address_netAssemblyArgs 
+    };
 
     // DWORD alignment
     auto DWAlign = []( size_t offset )
@@ -664,7 +681,8 @@ bool ProcessModules::InjectPureIL(
         return false;
 
     // Scary assembler code incoming!
-    AsmJitHelper a;
+    auto pAsm = AsmFactory::GetAssembler( _proc.core().isWow64() );
+    auto& a = *pAsm;
     AsmStackAllocator sa( a.assembler(), 0x30 );   // 0x30 - 6 arguments of ExecuteInDefaultAppDomain
 
     // Stack will be reserved manually

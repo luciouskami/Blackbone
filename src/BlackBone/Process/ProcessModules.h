@@ -55,7 +55,7 @@ public:
     /// </summary>
     /// <param name="name">Module name</param>
     /// <param name="type">Module type. 32 bit or 64 bit</param>
-    /// <param name="search">Saerch type.</param>
+    /// <param name="search">Search type.</param>
     /// <returns>Module data. nullptr if not found</returns>
     BLACKBONE_API ModuleDataPtr GetModule(
         const std::wstring& name,
@@ -66,7 +66,8 @@ public:
     /// <summary>
     /// Get module by name
     /// </summary>
-    /// <param name="name">TModule name.</param>
+    /// <param name="name">Module name.</param>
+    /// <param name="search">Search type.</param>
     /// <param name="type">Module type. 32 bit or 64 bit</param>
     /// <param name="baseModule">Import module name. Used only to resolve ApiSchema during manual map</param>
     /// <returns>Module data. nullptr if not found</returns>
@@ -82,8 +83,8 @@ public:
     /// </summary>
     /// <param name="modBase">Module base address</param>
     /// <param name="strict">If true modBase must exactly match module base address</param>
+    /// <param name="search">Search type.</param>
     /// <param name="type">Module type. 32 bit or 64 bit</param>
-    /// <param name="search">Saerch type.</param>
     /// <returns>Module data. nullptr if not found</returns>
     BLACKBONE_API ModuleDataPtr GetModule(
         module_t modBase,
@@ -118,7 +119,24 @@ public:
     /// <param name="name_ord">Function name or ordinal</param>
     /// <param name="baseModule">Import module name. Only used to resolve ApiSchema during manual map.</param>
     /// <returns>Export info. If failed procAddress field is 0</returns>
-    BLACKBONE_API call_result_t<exportData> GetExport( const ModuleDataPtr& hMod, const char* name_ord, const wchar_t* baseModule = L"" );
+    BLACKBONE_API call_result_t<exportData> GetExport( 
+        const ModuleDataPtr& hMod, 
+        const char* name_ord, 
+        const wchar_t* baseModule = L"" 
+    );
+
+    /// <summary>
+    /// Get export from ntdll
+    /// </summary>
+    /// <param name="name_ord">Function name or ordinal</param>
+    /// <param name="type">Module type. 32 bit or 64 bit</param>
+    /// <param name="search">Search type.</param>
+    /// <returns>Export info. If failed procAddress field is 0</returns>
+    BLACKBONE_API call_result_t<exportData> GetNtdllExport(
+        const char* name_ord, 
+        eModType type = mt_default, 
+        eModSeachType search = LdrList 
+    );
 
     /// <summary>
     /// Inject image into target process
@@ -163,17 +181,9 @@ public:
     /// <summary>
     /// Store manually mapped module in module list
     /// </summary>
-    /// <param name="FilePath">Full qualified module path</param>
-    /// <param name="base">Base address</param>
-    /// <param name="size">Module size</param>
-    /// <param name="mt">Module type. 32 bit or 64 bit</param>
+    /// <param name="mod">Module data</param>
     /// <returns>Module info</returns>
-    BLACKBONE_API ModuleDataPtr AddManualModule(
-        const std::wstring& FilePath,
-        module_t base,
-        size_t size, 
-        eModType mt
-        );
+    BLACKBONE_API ModuleDataPtr AddManualModule( const ModuleData& mod );
 
     /// <summary>
     /// Remove module from module list

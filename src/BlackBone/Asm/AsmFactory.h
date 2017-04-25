@@ -5,12 +5,6 @@
 #include "AsmHelper64.h"
 #include "AsmHelper32.h"
 
-#ifdef USE64
-#define AsmJitHelper AsmHelper64
-#else
-#define AsmJitHelper AsmHelper32
-#endif
-
 namespace blackbone
 {
 
@@ -58,9 +52,9 @@ public:
         
         switch (mt)
         {
-        case blackbone::mt_mod32:
+        case mt_mod32:
             return GetAssembler( asm32 );
-        case blackbone::mt_mod64:
+        case mt_mod64:
             return GetAssembler( asm64 );
         default:
             return nullptr;
@@ -74,10 +68,7 @@ public:
     /// <returns>AsmHelperBase interface</returns>
     static AsmHelperPtr GetAssembler( bool wow64process )
     {
-        if (wow64process)
-            return GetAssembler( asm32 );
-        else
-            return GetAssembler( asm64 );
+        return GetAssembler( wow64process ? asm32 : asm64 );
     }
 
 

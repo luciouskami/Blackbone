@@ -4,6 +4,7 @@
 #include "RPC/RemoteExec.h"
 #include "../Misc/NameResolve.h"
 #include "../Misc/Utils.h"
+#include "../Misc/PattrernLoader.h"
 #include "../Asm/AsmFactory.h"
 
 #include <memory>
@@ -18,10 +19,6 @@
 
 namespace blackbone
 {
-
-typedef std::unique_ptr<std::remove_pointer<HANDLE>::type, decltype(&CloseHandle)> handlePtr;
-
-
 ProcessModules::ProcessModules( class Process& proc )
     : _proc( proc )
     , _memory( _proc.memory() )
@@ -66,7 +63,7 @@ ModuleDataPtr ProcessModules::GetModule(
     const wchar_t* baseModule /*= L""*/
     )
 {
-    NameResolve::Instance().ResolvePath( name, Utils::StripPath( baseModule ), L"", NameResolve::ApiSchemaOnly, _core.pid() );
+    NameResolve::Instance().ResolvePath( name, Utils::StripPath( baseModule ), L"", NameResolve::ApiSchemaOnly, _proc );
 
     // Detect module type
     if (type == mt_default)
@@ -140,7 +137,7 @@ ModuleDataPtr ProcessModules::GetMainModule()
 {
     if (_proc.barrier().x86OS)
     {
-        _PEB32 peb = { { { 0 } } };
+        _PEB32 peb = { 0 };
         if (_proc.core().peb32( &peb ) == 0)
             return nullptr;
 
@@ -148,7 +145,7 @@ ModuleDataPtr ProcessModules::GetMainModule()
     }
     else
     {
-        _PEB64 peb = { { { 0 } } };
+        _PEB64 peb = { 0 };
         if (_proc.core().peb64( &peb ) == 0)
             return nullptr;
 
@@ -423,7 +420,7 @@ call_result_t<ModuleDataPtr> ProcessModules::Inject( const std::wstring& path )
 
     // Can't inject 32bit dll into native process
     if (!_proc.core().isWow64() && img.mType() == mt_mod32)
-        return STATUS_IMAGE_MACHINE_TYPE_MISMATCH;
+        return STATUS_INVALID_IMAGE_WIN_32;
 
     auto switchMode = NoSwitch;
     if (_proc.core().isWow64() && img.mType() == mt_mod64)
@@ -437,7 +434,7 @@ call_result_t<ModuleDataPtr> ProcessModules::Inject( const std::wstring& path )
     if (switchMode == ForceSwitch && !_ldrPatched && IsWindows7OrGreater() && !IsWindows8OrGreater())
     {
         uint8_t patch[] = { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 };
-        auto patchBase = _proc.nativeLdr().LdrKernel32PatchAddress();
+        auto patchBase = g_PatternLoader->data().LdrKernel32PatchAddress;
 
         if (patchBase != 0)
         {
@@ -666,7 +663,7 @@ bool ProcessModules::InjectPureIL(
 
     std::wstring libName = L"mscoree.dll";
 
-    NameResolve::Instance().ResolvePath( libName, L"", L"", NameResolve::EnsureFullPath, 0 );
+    NameResolve::Instance().ResolvePath( libName, L"", L"", NameResolve::EnsureFullPath, _proc );
 
     auto pMscoree = Inject( libName );
     if(!pMscoree)
@@ -870,7 +867,7 @@ bool ProcessModules::InjectPureIL(
 
     // write JIT code to target
     size_t codeSize = a->getCodeSize();
-    uintptr_t codeAddress = address.ptr<uintptr_t>() + offset;
+    ptr_t codeAddress = address.ptr() + offset;
 
     std::vector<uint8_t> codeBuffer( codeSize );
 

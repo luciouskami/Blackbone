@@ -38,9 +38,15 @@ Native::Native( HANDLE hProcess, bool x86OS /*= false*/ )
         else if (wowSrc == FALSE && wowTgt == FALSE)
             _wowBarrier.type = wow_64_64;
         else if (wowSrc == TRUE)
+        {
             _wowBarrier.type = wow_32_64;
+            _wowBarrier.mismatch = true;
+        }
         else
+        {
             _wowBarrier.type = wow_64_32;
+            _wowBarrier.mismatch = true;
+        }
     } 
 }
 
@@ -304,6 +310,24 @@ NTSTATUS Native::SetThreadContextT( HANDLE hThread, _CONTEXT32& ctx )
 }
 
 /// <summary>
+/// NtQueueApcThread
+/// </summary>
+/// <param name="hThread">Thread handle.</param>
+/// <param name="func">APC function</param>
+/// <param name="arg">APC argument</param>
+/// <returns>Status code</returns>
+NTSTATUS Native::QueueApcT( HANDLE hThread, ptr_t func, ptr_t arg )
+{
+    if (_wowBarrier.type == wow_64_32)
+    {
+        return SAFE_NATIVE_CALL( RtlQueueApcWow64Thread, hThread, reinterpret_cast<PVOID>(func), reinterpret_cast<PVOID>(arg), nullptr, nullptr );
+        //func = (~func) << 2;
+    }
+
+    return SAFE_NATIVE_CALL( NtQueueApcThread, hThread, reinterpret_cast<PVOID>(func), reinterpret_cast<PVOID>(arg), nullptr, nullptr );
+}
+
+/// <summary>
 /// Get WOW64 PEB
 /// </summary>
 /// <param name="ppeb">Retrieved PEB</param>
@@ -418,29 +442,29 @@ std::vector<MEMORY_BASIC_INFORMATION64> Native::EnumRegions( bool includeFree /*
 template<typename T>
 std::vector<ModuleDataPtr> Native::EnumModulesT()
 {
-    typename _PEB_T2<T>::type peb = { { { 0 } } };
-    _PEB_LDR_DATA2<T> ldr = { 0 };
+    _PEB_T<T> peb = { 0 };
+    _PEB_LDR_DATA2_T<T> ldr = { 0 };
     std::vector<ModuleDataPtr> result;
 
     if (getPEB( &peb ) != 0 && ReadProcessMemoryT( peb.Ldr, &ldr, sizeof(ldr), 0 ) == STATUS_SUCCESS)
     {
         for (T head = ldr.InLoadOrderModuleList.Flink;
-              head != (peb.Ldr + FIELD_OFFSET( _PEB_LDR_DATA2<T>, InLoadOrderModuleList ));
-              ReadProcessMemoryT( static_cast<ptr_t>(head), &head, sizeof(head), 0 ))
+              head != (peb.Ldr + FIELD_OFFSET( _PEB_LDR_DATA2_T<T>, InLoadOrderModuleList ));
+              ReadProcessMemoryT( static_cast<ptr_t>(head), &head, sizeof(head) ))
         {
             ModuleData data;
             wchar_t localPath[512] = { 0 };
-            _LDR_DATA_TABLE_ENTRY_BASE<T> localdata = { { 0 } };
+            _LDR_DATA_TABLE_ENTRY_BASE_T<T> localdata = { { 0 } };
 
             ReadProcessMemoryT( head, &localdata, sizeof(localdata), 0 );
-            ReadProcessMemoryT( localdata.FullDllName.Buffer, localPath, localdata.FullDllName.Length, 0 );
+            ReadProcessMemoryT( localdata.FullDllName.Buffer, localPath, localdata.FullDllName.Length );
 
             data.baseAddress = localdata.DllBase;
             data.size = localdata.SizeOfImage;
             data.fullPath = Utils::ToLower( localPath );
             data.name = Utils::StripPath( data.fullPath );
+            data.type = (sizeof( T ) < sizeof( uint64_t )) ? mt_mod32 : mt_mod64;
             data.manual = false;
-            data.type = std::is_same<T, DWORD>::value ? mt_mod32 : mt_mod64;
 
             result.emplace_back( std::make_shared<const ModuleData>( data ) );
         }
@@ -649,7 +673,7 @@ std::vector<ModuleDataPtr> Native::EnumModules( eModSeachType search/*= LdrList*
         if (mtype == mt_default)
             mtype = _wowBarrier.targetWow64 ? mt_mod32 : mt_mod64;
 
-        return (mtype == mt_mod32) ? EnumModulesT<DWORD>() : EnumModulesT<DWORD64>();
+        return CALL_64_86( mtype == mt_mod64, EnumModulesT );
     }
     else if(search == Sections)
     {

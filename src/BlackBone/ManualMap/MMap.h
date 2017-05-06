@@ -92,7 +92,7 @@ public:
 #endif
     /// <summary>Gets the size.</summary>
     /// <returns>An size_t.</returns>
-    uint64_t size() const {
+    size_t size() const {
         return _buffer.size();
     }
 
@@ -153,8 +153,8 @@ struct LoadData
 // Image mapping callback
 enum CallbackType
 {
-    PreCallback,        // Called before loading, loading type is decided here
-    PostCallback        // Called after manual mapping, but before entry point invocation, Loader flags are decided here
+    PreCallback,        // Called before loading. Loading type is decided here
+    PostCallback        // Called after manual mapping, but before entry point invocation. Loader flags are decided here
 };
 
 typedef LoadData( *MapCallback )(CallbackType type, void* context, Process& process, const ModuleData& modInfo);
@@ -181,7 +181,7 @@ typedef std::vector<std::unique_ptr<ImageContext>> vecImageCtx;
 /// <summary>
 /// Manual image mapper
 /// </summary>
-class MMap : public MExcept
+class MMap
 {
         
 public:
@@ -239,7 +239,6 @@ public:
     /// Reset local data
     /// </summary>
     BLACKBONE_API inline void reset() { _images.clear(); _pAContext.Reset(); _usedBlocks.clear(); }
-
 private:
     /// <summary>
     /// Manually map PE image into underlying target process
@@ -267,7 +266,8 @@ private:
     /// </summary>
     /// <param name="base">Image base</param>
     /// <param name="path">New image path</param>
-    void FixManagedPath( uintptr_t base, const std::wstring &path );
+    template<typename T>
+    void FixManagedPath( ptr_t base, const std::wstring &path );
 
     /// <summary>
     /// Get existing module or map it if absent
@@ -345,6 +345,21 @@ private:
     NTSTATUS DisableExceptions( ImageContext* pImage );
 
     /// <summary>
+    /// Calculate and set security cookie
+    /// </summary>
+    /// <param name="pImage">image data</param>
+    /// <returns>Status code</returns>
+    NTSTATUS InitializeCookie( ImageContext* pImage );
+
+    /// <summary>
+    /// Return existing or load missing dependency
+    /// </summary>
+    /// <param name="pImage">Currently mapped image data</param>
+    /// <param name="path">Dependency path</param>
+    /// <returns></returns>
+    call_result_t<ModuleDataPtr> FindOrMapDependency( ImageContext* pImage, std::wstring& path );
+
+    /// <summary>
     /// Create activation context
     /// Target memory layout:
     /// -----------------------------
@@ -358,11 +373,11 @@ private:
     NTSTATUS CreateActx( const pe::PEImage& image );
 
     /// <summary>
-    /// Calculate and set security cookie
+    /// Do SxS path probing in the target process
     /// </summary>
-    /// <param name="pImage">image data</param>
+    /// <param name="path">Path to probe</param>
     /// <returns>Status code</returns>
-    NTSTATUS InitializeCookie( ImageContext* pImage );
+    NTSTATUS ProbeRemoteSxS( std::wstring& path );
 
     /// <summary>
     /// Hide memory VAD node
@@ -380,14 +395,6 @@ private:
     NTSTATUS AllocateInHighMem( MemBlock& imageMem, size_t size );
 
     /// <summary>
-    /// Return existing or load missing dependency
-    /// </summary>
-    /// <param name="pImage">Currently mapped image data</param>
-    /// <param name="path">Dependency path</param>
-    /// <returns></returns>
-    call_result_t<ModuleDataPtr> FindOrMapDependency( ImageContext* pImage, std::wstring& path );
-
-    /// <summary>
     /// Transform section characteristics into memory protection flags
     /// </summary>
     /// <param name="characteristics">Section characteristics</param>
@@ -395,11 +402,12 @@ private:
     DWORD GetSectionProt( DWORD characteristics );
 
 private:
-    vecImageCtx     _images;                // Mapped images
     class Process&  _process;               // Target process manager
+    MExcept         _expMgr;                // Exception handler manager
+    vecImageCtx     _images;                // Mapped images
     MemBlock        _pAContext;             // SxS activation context memory address
     MapCallback     _mapCallback = nullptr; // Loader callback for adding image into loader lists
-    void*           _userContext = nullptr;  // user context for _ldrCallback       
+    void*           _userContext = nullptr; // user context for _ldrCallback       
 
     std::vector<std::pair<ptr_t, size_t>> _usedBlocks;   // Used memory blocks 
 };

@@ -2,6 +2,7 @@
 #include "../Process/Process.h"
 #include "../Include/Macro.h"
 #include "../Misc/Trace.hpp"
+#include "../Misc/PattrernLoader.h"
 #include "../Asm/LDasm.h"
 
 namespace blackbone
@@ -198,37 +199,26 @@ uint8_t MExcept::_handler64[] =
     0x08, 0xC3, 0x33, 0xC0, 0x48, 0x83, 0xC4, 0x08, 0xC3
 };
 
-MExcept::MExcept( class Process& proc )
-    : _proc( proc )
-{
-    //AddVectoredExceptionHandler( 0, &VectoredHandler );
-}
-
-MExcept::~MExcept()
-{
-}
-
 /// <summary>
 /// Inject VEH wrapper into process
 /// Used to enable execution of SEH handlers out of image
 /// </summary>
-/// <param name="pTargetBase">Target image base address</param>
-/// <param name="imageSize">Size of the image</param>
-/// <param name="mt">Mosule type</param>
+/// <param name="proc">Target process</param>
+/// <param name="mod">Target module</param>
 /// <param name="partial">Partial exception support</param>
 /// <returns>Error code</returns>
-NTSTATUS MExcept::CreateVEH( uintptr_t pTargetBase, size_t imageSize, eModType mt, bool partial )
+NTSTATUS MExcept::CreateVEH( Process& proc, ModuleData& mod, bool partial )
 {    
-    auto a = AsmFactory::GetAssembler( mt );
+    auto a = AsmFactory::GetAssembler( mod.type );
     uint64_t result = 0;
-    auto& mods = _proc.modules();
+    auto& mods = proc.modules();
 
-    if(mt == mt_mod64)
+    if(mod.type == mt_mod64)
     {
         // Add module to module table
         if (!_pModTable.valid())
         {
-            auto mem = _proc.memory().Allocate( 0x1000, PAGE_READWRITE, 0, false );
+            auto mem = proc.memory().Allocate( 0x1000, PAGE_READWRITE, 0, false );
             if (!mem)
                 return mem.status;
 
@@ -239,8 +229,8 @@ NTSTATUS MExcept::CreateVEH( uintptr_t pTargetBase, size_t imageSize, eModType m
         _pModTable.Read ( 0, table );
 
         // Add new entry to the table
-        table.entry[table.count].base = pTargetBase;
-        table.entry[table.count].size = imageSize;
+        table.entry[table.count].base = mod.baseAddress;
+        table.entry[table.count].size = mod.size;
         table.count++;
 
         _pModTable.Write( 0, table );
@@ -250,7 +240,7 @@ NTSTATUS MExcept::CreateVEH( uintptr_t pTargetBase, size_t imageSize, eModType m
             return STATUS_SUCCESS;
 
         // VEH codecave
-        auto mem = _proc.memory().Allocate( 0x2000, PAGE_EXECUTE_READWRITE, 0, false );
+        auto mem = proc.memory().Allocate( 0x2000, PAGE_EXECUTE_READWRITE, 0, false );
         if (!mem)
             return mem.status;
 
@@ -288,13 +278,13 @@ NTSTATUS MExcept::CreateVEH( uintptr_t pTargetBase, size_t imageSize, eModType m
             return STATUS_SUCCESS;
 
         // VEH codecave
-        auto mem = _proc.memory().Allocate( 0x2000, PAGE_EXECUTE_READWRITE, 0, false );
+        auto mem = proc.memory().Allocate( 0x2000, PAGE_EXECUTE_READWRITE, 0, false );
         if (!mem)
             return mem.status;
 
         _pVEHCode = std::move( mem.result() );
 
-        auto pDecode = mods.GetNtdllExport( "RtlDecodeSystemPointer", mt, Sections );
+        auto pDecode = mods.GetNtdllExport( "RtlDecodeSystemPointer", mod.type, Sections );
         if (!pDecode)
             return pDecode.status;
 
@@ -304,7 +294,7 @@ NTSTATUS MExcept::CreateVEH( uintptr_t pTargetBase, size_t imageSize, eModType m
             // LdrpInvertedFunctionTable
             if (*(uint32_t*)pData == 0xDEADDA7A)
             {
-                *(uint32_t*)pData = static_cast<uint32_t>(_proc.nativeLdr().LdrpInvertedFunctionTable());
+                *(uint32_t*)pData = static_cast<uint32_t>(g_PatternLoader->data().LdrpInvertedFunctionTable32);
                 continue;
             }
 
@@ -318,7 +308,7 @@ NTSTATUS MExcept::CreateVEH( uintptr_t pTargetBase, size_t imageSize, eModType m
             // LdrProtectMrdata address
             if (*(uint32_t*)pData == 0xDEADC0D2)
             {
-                *(uint32_t*)pData = static_cast<uint32_t>(_proc.nativeLdr().LdrProtectMrdata());
+                *(uint32_t*)pData = static_cast<uint32_t>(g_PatternLoader->data().LdrProtectMrdata);
                 continue;
             }
         }
@@ -332,7 +322,7 @@ NTSTATUS MExcept::CreateVEH( uintptr_t pTargetBase, size_t imageSize, eModType m
     }
 
     // AddVectoredExceptionHandler(0, pHandler);
-    auto pAddHandler = mods.GetNtdllExport( "RtlAddVectoredExceptionHandler", mt, Sections );
+    auto pAddHandler = mods.GetNtdllExport( "RtlAddVectoredExceptionHandler", mod.type, Sections );
     if (!pAddHandler)
         return pAddHandler.status;
 
@@ -341,27 +331,35 @@ NTSTATUS MExcept::CreateVEH( uintptr_t pTargetBase, size_t imageSize, eModType m
 
     a->GenCall( pAddHandler->procAddress, { 0, _pVEHCode.ptr() } );
 
-    _proc.remote().AddReturnWithEvent( *a, mt );
+    proc.remote().AddReturnWithEvent( *a, mod.type );
     a->GenEpilogue();
 
-    _proc.remote().ExecInWorkerThread( (*a)->make(), (*a)->getCodeSize(), result );
-    _hVEH = result;
-
-    return (_hVEH == 0 ? STATUS_NOT_FOUND : STATUS_SUCCESS);
+    NTSTATUS status = proc.remote().ExecInWorkerThread( (*a)->make(), (*a)->getCodeSize(), result );
+    if (result != 0)
+    {
+        _hVEH = result;
+        return STATUS_SUCCESS;
+    }
+    else
+    {
+        status = proc.remote().GetLastStatus();
+        return status;
+    }
 }
 
 /// <summary>
 /// Removes VEH from target process
 /// </summary>
+/// <param name="proc">Target process</param>
 /// <param name="partial">Partial exception support</param>
 /// <param name="mt">Mosule type</param>
 /// <returns>Status code</returns>
-NTSTATUS MExcept::RemoveVEH( bool partial, eModType mt )
+NTSTATUS MExcept::RemoveVEH( Process& proc, bool partial, eModType mt )
 {  
     auto a = AsmFactory::GetAssembler( mt );
     uint64_t result = 0;
 
-    auto& mods = _proc.modules();
+    auto& mods = proc.modules();
     auto pRemoveHandler = mods.GetNtdllExport( "RtlRemoveVectoredExceptionHandler", mt );
     if (!pRemoveHandler)
         return pRemoveHandler.status;
@@ -371,13 +369,13 @@ NTSTATUS MExcept::RemoveVEH( bool partial, eModType mt )
     // RemoveVectoredExceptionHandler(pHandler);
     a->GenCall( pRemoveHandler->procAddress, { _hVEH } );
 
-    _proc.remote().AddReturnWithEvent( *a );
+    proc.remote().AddReturnWithEvent( *a );
     a->GenEpilogue();
 
     // Destroy table and handler
     if (!partial)
     {
-        _proc.remote().ExecInWorkerThread( (*a)->make(), (*a)->getCodeSize(), result );
+        proc.remote().ExecInWorkerThread( (*a)->make(), (*a)->getCodeSize(), result );
         _pVEHCode.Free();
         _hVEH = 0;
 

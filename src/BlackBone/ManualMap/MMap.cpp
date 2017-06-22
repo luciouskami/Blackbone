@@ -93,7 +93,8 @@ call_result_t<ModuleDataPtr> MMap::MapImageInternal(
         return hMod;
 
     // Prepare target process
-    auto status = _process.remote().CreateRPCEnvironment();
+    auto mode = (flags & NoThreads) ? Worker_UseExisting : Worker_CreateNew;
+    auto status = _process.remote().CreateRPCEnvironment( mode, true );
     if (!NT_SUCCESS( status ))
     {
         Cleanup();
@@ -213,7 +214,7 @@ call_result_t<ModuleDataPtr> MMap::MapImageInternal(
         }
     }
 
-    Cleanup();
+    //Cleanup();
     return mod;
 }
 
@@ -524,8 +525,6 @@ NTSTATUS MMap::UnmapAllModules()
     } 
 
     Cleanup();
-    reset();
-
     return STATUS_SUCCESS;
 }
 
@@ -1083,7 +1082,7 @@ NTSTATUS MMap::InitializeCookie( ImageContextPtr pImage )
     GetSystemTimeAsFileTime( &systime );
     QueryPerformanceCounter( &PerformanceCount );
 
-    ptr_t cookie = _process.pid() ^ _process.remote().getWorker()->id() ^ reinterpret_cast<uintptr_t>(&cookie);
+    ptr_t cookie = _process.pid() ^ _process.remote().getExecThread()->id() ^ reinterpret_cast<uintptr_t>(&cookie);
 
     if (pImage->ldrEntry.type == mt_mod64)
     {
@@ -1335,7 +1334,7 @@ NTSTATUS MMap::CreateActx( const pe::PEImage& image  )
         (*a)->mov( (*a)->zdx, _pAContext.ptr() );
         (*a)->mov( (*a)->intptr_ptr( (*a)->zdx ), (*a)->zax );
 
-        _process.remote().AddReturnWithEvent( *a );
+        _process.remote().AddReturnWithEvent( *a, image.mType() );
         a->GenEpilogue();
 
         status = _process.remote().ExecInWorkerThread( (*a)->make(), (*a)->getCodeSize(), result );

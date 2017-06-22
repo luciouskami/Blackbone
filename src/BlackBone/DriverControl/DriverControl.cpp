@@ -66,15 +66,15 @@ NTSTATUS DriverControl::Reload( std::wstring path /*= L"" */ )
         const wchar_t* filename = nullptr;
 
         if (IsWindows10OrGreater())
-            filename = L"BlackBoneDrv10.sys";
+            filename = BLACKBONE_FILE_NAME_10;
         else if (IsWindows8Point1OrGreater())
-            filename = L"BlackBoneDrv81.sys";
+            filename = BLACKBONE_FILE_NAME_81;
         else if (IsWindows8OrGreater())
-            filename = L"BlackBoneDrv8.sys";
+            filename = BLACKBONE_FILE_NAME_8;
         else if (IsWindows7OrGreater())
-            filename = L"BlackBoneDrv7.sys";
+            filename = BLACKBONE_FILE_NAME_7;
         else
-            filename = L"BlackBoneDrv.sys";
+            filename = BLACKBONE_FILE_NAME;
 
         path = Utils::GetExeDirectory() + L"\\" + filename;
     }
@@ -275,12 +275,19 @@ NTSTATUS DriverControl::DisableDEP( DWORD pid )
 /// Change process protection flag
 /// </summary>
 /// <param name="pid">Target PID</param>
-/// <param name="enable">true to enable protection, false to disable</param>
+/// <param name="protection">Process protection policy</param>
+/// <param name="dynamicCode">Prohibit dynamic code</param>
+/// <param name="binarySignature">Prohibit loading non-microsoft dlls</param>
 /// <returns>Status code</returns>
-NTSTATUS DriverControl::ProtectProcess( DWORD pid, bool enable )
+NTSTATUS DriverControl::ProtectProcess(
+    DWORD pid,
+    PolicyOpt protection,
+    PolicyOpt dynamicCode /*= Policy_Keep*/,
+    PolicyOpt binarySignature /*= Policy_Keep*/
+    )
 {
     DWORD bytes = 0;
-    SET_PROC_PROTECTION setProt = { pid, enable };
+    SET_PROC_PROTECTION setProt = { pid, protection, dynamicCode, binarySignature };
 
     // Not loaded
     if (_hDriver == INVALID_HANDLE_VALUE)

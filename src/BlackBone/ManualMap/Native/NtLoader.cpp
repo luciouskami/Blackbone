@@ -180,7 +180,7 @@ NTSTATUS NtLdr::AddStaticTLSEntry( const NtLdrEntry& mod, ptr_t tlsPtr )
     if (wxp && tlsPtr != 0)
     {
         ptr_t pTeb = 0;
-        pTeb = _process.remote().getWorker()->teb( static_cast<_TEB32*>(nullptr) );
+        pTeb = _process.remote().getExecThread()->teb( static_cast<_TEB32*>(nullptr) );
 
         auto mem = _process.memory().Allocate( 0x1000, PAGE_READWRITE, 0, false );
         if (!mem)
@@ -980,6 +980,9 @@ void NtLdr::UnlinkListEntry( ptr_t pListLink )
 template<typename T>
 ptr_t NtLdr::UnlinkTreeNode( const ModuleData& mod, ptr_t ldrEntry )
 {
+    if (ldrEntry == 0)
+        return ldrEntry;
+
     auto a = AsmFactory::GetAssembler( mod.type );
     uint64_t result = 0;
 

@@ -530,7 +530,7 @@ NTSTATUS BBLookupProcessThread( IN PEPROCESS pProcess, OUT PETHREAD* ppThread )
             // Skip current thread
             if (/*pInfo->Threads[i].WaitReason == Suspended ||
                  pInfo->Threads[i].ThreadState == 5 ||*/
-                 pInfo->Threads[i].ClientId.UniqueThread == PsGetCurrentThread())
+                 pInfo->Threads[i].ClientId.UniqueThread == PsGetCurrentThreadId())
             {
                 continue;
             }
@@ -641,7 +641,8 @@ NTSTATUS BBQueueUserApc(
     IN PVOID Arg1,
     IN PVOID Arg2,
     IN PVOID Arg3,
-    IN BOOLEAN bForce )
+    IN BOOLEAN bForce
+    )
 {
     ASSERT( pThread != NULL );
     if (pThread == NULL)

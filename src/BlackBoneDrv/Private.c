@@ -453,8 +453,8 @@ NTSTATUS
 NTAPI
 ZwProtectVirtualMemory(
     IN HANDLE ProcessHandle,
-    IN OUT PVOID* BaseAddress,
-    IN OUT SIZE_T* NumberOfBytesToProtect,
+    IN PVOID* BaseAddress,
+    IN SIZE_T* NumberOfBytesToProtect,
     IN ULONG NewAccessProtection,
     OUT PULONG OldAccessProtection
     )
@@ -470,17 +470,9 @@ ZwProtectVirtualMemory(
         //
         PUCHAR pPrevMode = (PUCHAR)PsGetCurrentThread() + dynData.PrevMode;
         UCHAR prevMode = *pPrevMode;
-        PVOID BaseCopy = NULL;
-        SIZE_T SizeCopy = 0;
         *pPrevMode = KernelMode;
 
-        if (BaseAddress)
-            BaseCopy = *BaseAddress;
-
-        if (NumberOfBytesToProtect)
-            SizeCopy = *NumberOfBytesToProtect;
-
-        status = NtProtectVirtualMemory( ProcessHandle, &BaseCopy, &SizeCopy, NewAccessProtection, OldAccessProtection );
+        status = NtProtectVirtualMemory( ProcessHandle, BaseAddress, NumberOfBytesToProtect, NewAccessProtection, OldAccessProtection );
 
         *pPrevMode = prevMode;
     }

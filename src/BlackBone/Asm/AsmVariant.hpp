@@ -3,7 +3,7 @@
 
 #include "../Config.h"
 #pragma warning(disable : 4100)
-#include "../../../contrib/AsmJit/AsmJit.h"
+#include <AsmJit/AsmJit.h>
 #pragma warning(default : 4100)
 
 #include <vector>
@@ -65,6 +65,11 @@ struct AsmVariant
         }
         // void*, const void*, etc.
         else if constexpr(is_void_ptr<RAW_T>)
+        {
+            set( imm, argSize, reinterpret_cast<uint64_t>(arg) );
+        }
+        // dirty hack to threat HWND as a simple pointer
+        else if constexpr(std::is_same_v<RAW_T, HWND>)
         {
             set( imm, argSize, reinterpret_cast<uint64_t>(arg) );
         }

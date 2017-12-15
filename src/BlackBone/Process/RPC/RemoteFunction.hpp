@@ -19,12 +19,20 @@ public:
     struct CallArguments
     {
         CallArguments( const Args&... args )
-            : arguments( { AsmVariant( args )... } ) { }
+            : arguments{ AsmVariant( args )... }
+        { 
+        }
+
+        template<size_t... S>
+        CallArguments( const std::tuple<Args...>& args, std::index_sequence<S...> )
+            : arguments{ std::get<S>( args )... }
+        {
+        }
 
         // Manually set argument to custom value
         void set( int pos, const AsmVariant& newVal )
         {
-            if (arguments.size() > (size_t)pos)
+            if (arguments.size() > static_cast<size_t>(pos))
                 arguments[pos] = newVal;
         }
 
@@ -38,8 +46,8 @@ public:
         , _conv( conv )
     {
         static_assert(
-            !std::disjunction_v<std::is_reference<Args>...>,
-            "Please replace reference type to pointer type in function type specification"
+            (... && !std::is_reference_v<Args>),
+            "Please replace reference type with pointer type in function type specification"
             );
     }
 
@@ -124,6 +132,12 @@ public: \
     call_result_t<ReturnType> Call( const Args&... args, ThreadPtr contextThread = nullptr ) \
     { \
         CallArguments a( args... ); \
+        return RemoteFunctionBase::Call( a, contextThread ); \
+    } \
+\
+    call_result_t<ReturnType> Call( const std::tuple<Args...>& args, ThreadPtr contextThread = nullptr ) \
+    { \
+        CallArguments a( args, std::index_sequence_for<Args...>() ); \
         return RemoteFunctionBase::Call( a, contextThread ); \
     } \
 \

@@ -9,6 +9,10 @@
 #include <random>
 #include <VersionHelpers.h>
 
+#ifndef STATUS_INVALID_EXCEPTION_HANDLER
+#define STATUS_INVALID_EXCEPTION_HANDLER ((NTSTATUS)0xC00001A5L)
+#endif
+
 namespace blackbone
 {
 
@@ -516,9 +520,11 @@ NTSTATUS MMap::UnmapAllModules()
         if (!(pImage->flags & NoExceptions))
             DisableExceptions( pImage );
 
+        _process.nativeLdr().UnloadTLS( pImage->ldrEntry );
+
         // Remove from loader
         if (pImage->ldrEntry.flags != Ldr_None)
-            _process.modules().Unlink( pImage->ldrEntry );
+            _process.nativeLdr().Unlink( pImage->ldrEntry );
 
         // Free memory
         pImage->imgMem.Free();
